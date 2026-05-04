@@ -55,7 +55,7 @@ jobs:
           PKG="${{ steps.url.outputs.pkg }}"
           mkdir -p twa-app/app/src/main/res/values twa-app/gradle/wrapper
 
-          # settings.gradle com dependencyResolutionManagement (obrigatorio no AGP 8)
+          # settings.gradle com dependencyResolutionManagement
           cat > twa-app/settings.gradle << 'EOFILE'
           pluginManagement {
               repositories { google(); mavenCentral(); gradlePluginPortal() }
@@ -71,7 +71,7 @@ jobs:
           # gradle.properties
           printf 'android.useAndroidX=true\nandroid.enableJetifier=true\norg.gradle.jvmargs=-Xmx2048m\n' > twa-app/gradle.properties
 
-          # build.gradle raiz (sem allprojects - repositorios vao no settings)
+          # build.gradle raiz - apenas plugin declaration, sem repositories
           cat > twa-app/build.gradle << 'EOFILE'
           plugins {
               id "com.android.application" version "8.2.2" apply false
@@ -133,7 +133,7 @@ jobs:
           printf '<?xml version="1.0"?>\n<resources><string name="app_name">SK Code Editor</string></resources>\n' > twa-app/app/src/main/res/values/strings.xml
           printf '<?xml version="1.0"?>\n<resources><color name="colorPrimary">#0d1117</color></resources>\n' > twa-app/app/src/main/res/values/colors.xml
 
-          # gradle wrapper
+          # gradle wrapper properties
           cat > twa-app/gradle/wrapper/gradle-wrapper.properties << 'EOFILE'
           distributionBase=GRADLE_USER_HOME
           distributionPath=wrapper/dists
@@ -142,14 +142,24 @@ jobs:
           zipStorePath=wrapper/dists
           EOFILE
 
+          # Baixar o gradle wrapper JAR
+          curl -sL https://raw.githubusercontent.com/gradle/gradle/v8.4.0/gradle/wrapper/gradle-wrapper.jar \
+            -o twa-app/gradle/wrapper/gradle-wrapper.jar
+
+          # gradlew script
+          curl -sL https://raw.githubusercontent.com/gradle/gradle/v8.4.0/gradlew \
+            -o twa-app/gradlew && chmod +x twa-app/gradlew
+
           find twa-app -type f | sort
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
+        with:
+          dependency-graph: disabled
 
       - name: Build APK
         working-directory: twa-app
-        run: gradle assembleDebug --no-daemon --stacktrace
+        run: ./gradlew assembleDebug --no-daemon --stacktrace
         env:
           ANDROID_HOME: ${{ env.ANDROID_HOME }}
           ANDROID_SDK_ROOT: ${{ env.ANDROID_SDK_ROOT }}
