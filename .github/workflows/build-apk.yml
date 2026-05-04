@@ -1,0 +1,157 @@
+name: Build APK Android (TWA)
+
+on:
+  workflow_dispatch:
+    inputs:
+      pages_url:
+        description: "URL do GitHub Pages (ex: https://usuario.github.io/sk-code-editor/)"
+        required: false
+        default: ""
+  push:
+    branches: [main, master]
+    paths:
+      - "public/manifest.json"
+
+permissions:
+  contents: write
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          java-version: "17"
+          distribution: "temurin"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Bubblewrap
+        run: npm install -g @bubblewrap/cli@latest
+
+      - name: Calcular URL do GitHub Pages
+        id: pages
+        run: |
+          OWNER="${{ github.repository_owner }}"
+          REPO="${{ github.event.repository.name }}"
+          INPUT_URL="${{ github.event.inputs.pages_url }}"
+          if [ -n "$INPUT_URL" ]; then
+            PAGES_URL="$INPUT_URL"
+          else
+            PAGES_URL="https://${OWNER}.github.io/${REPO}/"
+          fi
+          echo "url=$PAGES_URL" >> $GITHUB_OUTPUT
+          echo "owner=$OWNER" >> $GITHUB_OUTPUT
+          echo "repo=$REPO" >> $GITHUB_OUTPUT
+          echo "Gerando APK para: $PAGES_URL"
+
+      - name: Criar twa-manifest.json
+        run: |
+          PAGES_URL="${{ steps.pages.outputs.url }}"
+          OWNER="${{ steps.pages.outputs.owner }}"
+          REPO="${{ steps.pages.outputs.repo }}"
+          HOST=$(echo "$PAGES_URL" | sed 's|https://||' | sed 's|/.*||')
+          START_PATH=$(echo "$PAGES_URL" | sed "s|https://$HOST||")
+
+          cat > twa-manifest.json << EOF
+          {
+            "packageId": "com.$(echo $OWNER | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9').$(echo $REPO | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9')",
+            "host": "$HOST",
+            "name": "SK Code Editor",
+            "launcherName": "SK Editor",
+            "display": "standalone",
+            "themeColor": "#0d1117",
+            "navigationColor": "#0d1117",
+            "navigationColorDark": "#0d1117",
+            "navigationDividerColor": "#0d1117",
+            "navigationDividerColorDark": "#0d1117",
+            "backgroundColor": "#0d1117",
+            "enableNotifications": false,
+            "startUrl": "${START_PATH}",
+            "iconUrl": "${PAGES_URL}icon-512.png",
+            "maskableIconUrl": "${PAGES_URL}icon-512.png",
+            "monochromeIconUrl": "${PAGES_URL}icon-512.png",
+            "appVersion": "2.0.0",
+            "appVersionCode": 20000,
+            "signingKey": {
+              "path": "./android.keystore",
+              "alias": "skcodeeditor"
+            },
+            "shortcuts": [],
+            "generatorApp": "bubblewrap-cli",
+            "webManifestUrl": "${PAGES_URL}manifest.json",
+            "fallbackType": "customtabs",
+            "features": {},
+            "alphaDependencies": { "enabled": false },
+            "enableSiteSettingsShortcut": true,
+            "isChromeOSOnly": false,
+            "isMetaQuest": false,
+            "minSdkVersion": 21,
+            "orientation": "default",
+            "fullScopeUrl": "$PAGES_URL",
+            "locationDelegation": { "enabled": true },
+            "googlePlayBilling": { "enabled": false }
+          }
+          EOF
+          echo "✅ twa-manifest.json criado"
+          cat twa-manifest.json
+
+      - name: Gerar keystore para assinar o APK
+        run: |
+          keytool -genkey -v \
+            -keystore android.keystore \
+            -alias skcodeeditor \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -storepass skcodeeditor123 \
+            -keypass skcodeeditor123 \
+            -dname "CN=SK Code Editor, OU=Dev, O=SKEditor, L=BR, ST=BR, C=BR"
+          echo "✅ Keystore gerado"
+
+      - name: Inicializar projeto TWA com Bubblewrap
+        run: |
+          bubblewrap init --manifest twa-manifest.json --directory ./twa-project
+        env:
+          BUBBLEWRAP_KEYSTORE_PASSWORD: skcodeeditor123
+          BUBBLEWRAP_KEY_PASSWORD: skcodeeditor123
+
+      - name: Build APK
+        run: |
+          cd twa-project
+          bubblewrap build
+        env:
+          BUBBLEWRAP_KEYSTORE_PASSWORD: skcodeeditor123
+          BUBBLEWRAP_KEY_PASSWORD: skcodeeditor123
+
+      - name: Encontrar APK gerado
+        id: find_apk
+        run: |
+          APK=$(find . -name "*.apk" | head -1)
+          echo "path=$APK" >> $GITHUB_OUTPUT
+          echo "✅ APK encontrado em: $APK"
+          ls -lh $APK
+
+      - name: Upload APK como artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SK-Code-Editor-APK
+          path: ${{ steps.find_apk.outputs.path }}
+          retention-days: 30
+
+      - name: Salvar APK no repositório (pasta releases/)
+        run: |
+          mkdir -p releases
+          cp "${{ steps.find_apk.outputs.path }}" releases/sk-code-editor.apk
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git add releases/sk-code-editor.apk
+          git commit -m "🤖 APK gerado automaticamente v$(date +'%Y%m%d')" || echo "Sem mudanças"
+          git push || echo "Push falhou (normal se sem permissão)"
