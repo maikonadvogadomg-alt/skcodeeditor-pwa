@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       pages_url:
-        description: "URL do GitHub Pages (vazio = calcular automaticamente)"
+        description: "URL do GitHub Pages (vazio = automatico)"
         required: false
         default: ""
 
@@ -55,18 +55,30 @@ jobs:
           PKG="${{ steps.url.outputs.pkg }}"
           mkdir -p twa-app/app/src/main/res/values twa-app/gradle/wrapper
 
-          printf 'rootProject.name = "SKCodeEditor"\ninclude ":app"\n' > twa-app/settings.gradle
-
-          printf 'android.useAndroidX=true\nandroid.enableJetifier=true\norg.gradle.jvmargs=-Xmx2048m\n' > twa-app/gradle.properties
-
-          cat > twa-app/build.gradle << 'EOFILE'
-          buildscript {
-              repositories { google(); mavenCentral() }
-              dependencies { classpath "com.android.tools.build:gradle:8.2.2" }
+          # settings.gradle com dependencyResolutionManagement (obrigatorio no AGP 8)
+          cat > twa-app/settings.gradle << 'EOFILE'
+          pluginManagement {
+              repositories { google(); mavenCentral(); gradlePluginPortal() }
           }
-          allprojects { repositories { google(); mavenCentral() } }
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories { google(); mavenCentral() }
+          }
+          rootProject.name = "SKCodeEditor"
+          include ":app"
           EOFILE
 
+          # gradle.properties
+          printf 'android.useAndroidX=true\nandroid.enableJetifier=true\norg.gradle.jvmargs=-Xmx2048m\n' > twa-app/gradle.properties
+
+          # build.gradle raiz (sem allprojects - repositorios vao no settings)
+          cat > twa-app/build.gradle << 'EOFILE'
+          plugins {
+              id "com.android.application" version "8.2.2" apply false
+          }
+          EOFILE
+
+          # app/build.gradle
           cat > twa-app/app/build.gradle << EOFILE
           plugins { id "com.android.application" }
           android {
@@ -84,6 +96,7 @@ jobs:
           }
           EOFILE
 
+          # AndroidManifest.xml
           cat > twa-app/app/src/main/AndroidManifest.xml << EOFILE
           <?xml version="1.0" encoding="utf-8"?>
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
@@ -120,6 +133,7 @@ jobs:
           printf '<?xml version="1.0"?>\n<resources><string name="app_name">SK Code Editor</string></resources>\n' > twa-app/app/src/main/res/values/strings.xml
           printf '<?xml version="1.0"?>\n<resources><color name="colorPrimary">#0d1117</color></resources>\n' > twa-app/app/src/main/res/values/colors.xml
 
+          # gradle wrapper
           cat > twa-app/gradle/wrapper/gradle-wrapper.properties << 'EOFILE'
           distributionBase=GRADLE_USER_HOME
           distributionPath=wrapper/dists
